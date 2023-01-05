@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fake-pod-ds
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: fake-pod
+  template:
+    metadata:
+      labels:
+        app: fake-pod
+    spec:
+      hostNetwork: true
+      containers:
+      - image: fake-image
+        imagePullPolicy: Always
+        name: fake-container
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      nodeSelector:
+        type: kwok
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoSchedule
+        key: kwok.x-k8s.io/node
+        operator: Exists

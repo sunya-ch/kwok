@@ -14,42 +14,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package clusters contains a command to list existing clusters.
 package clusters
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 // NewCommand returns a new cobra.Command for getting the list of clusters
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "clusters",
 		Short: "Lists existing clusters by their name",
 		Long:  "Lists existing clusters by their name",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runE(cmd.Context())
+			return runE(logger)
 		},
 	}
 	return cmd
 }
 
-func runE(ctx context.Context) error {
-	clusters, err := runtime.ListClusters(config.ClustersDir)
+func runE(logger logger.Logger) error {
+	clusters, err := runtime.ListClusters(vars.ClustersDir)
 	if err != nil {
 		return err
 	}
 	if len(clusters) == 0 {
-		logger := log.FromContext(ctx)
-		logger.Info("No clusters found")
+		logger.Printf("no clusters found")
 	} else {
 		for _, cluster := range clusters {
 			fmt.Println(cluster)

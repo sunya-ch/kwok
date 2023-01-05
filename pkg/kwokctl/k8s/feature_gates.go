@@ -26,9 +26,6 @@ import (
 var lockEnabled = map[string]bool{}
 
 func GetFeatureGates(version int) string {
-	if version < 0 {
-		return ""
-	}
 	// Enable only the beta feature of the final GA
 	isGA := map[string]bool{}
 	for _, raw := range rawData {

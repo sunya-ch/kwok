@@ -55,9 +55,9 @@ function wait_resource() {
   local got
   local all
   while true; do
-    raw="$(kwokctl kubectl get --no-headers "${name}" | grep "fake-" 2>/dev/null)"
+    raw="$(kwokctl kubectl get --no-headers "${name}" 2>/dev/null)"
     got=$(echo "${raw}" | grep -c "${reason}")
-    if [[ "${got}" == "${want}" ]]; then
+    if [ "${got}" -eq "${want}" ]; then
       echo "${name} ${got} done"
       break
     else
@@ -120,24 +120,24 @@ function scale_create_pod() {
   local size="${1}"
   local node_name
   node_name="$(kwokctl kubectl get node -o jsonpath='{.items.*.metadata.name}' | tr ' ' '\n' | grep fake- | head -n 1)"
-  gen_pods "${size}" "${node_name}" | kwokctl kubectl apply -f - >/dev/null &
+  gen_pods "${size}" "${node_name}" | kwokctl kubectl create -f - >/dev/null 2>&1 &
   wait_resource Pod Running "${size}"
 }
 
 function scale_delete_pod() {
   local size="${1}"
-  kwokctl kubectl delete pod -l app=fake-pod --grace-period 1 >/dev/null &
+  kwokctl kubectl delete pod -l app=fake-pod --grace-period 1 >/dev/null 2>&1 &
   wait_resource Pod fake-pod- "${size}"
 }
 
 function scale_create_node() {
   local size="${1}"
-  gen_nodes "${size}" "fake-node" | kwokctl kubectl apply -f - >/dev/null &
+  gen_nodes "${size}" "fake-node" | kwokctl kubectl create -f - >/dev/null 2>&1 &
   wait_resource Node Ready "${size}"
 }
 
 function create_cluster() {
-  KWOK_KUBE_VERSION="${KWOK_KUBE_VERSION}" kwokctl -v=-4 create cluster --timeout 10m --wait 10m --quiet-pull || {
+  KWOK_KUBE_VERSION="${KWOK_KUBE_VERSION}" kwokctl create cluster --quiet-pull || {
     echo "Error: Failed to create cluster" >&2
     exit 1
   }

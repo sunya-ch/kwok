@@ -14,28 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package delete defines a parent command for cluster deletion.
 package delete
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/delete/cluster"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 // NewCommand returns a new cobra.Command for cluster creation
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "delete",
 		Short: "Deletes one of [cluster]",
 		Long:  "Deletes one of [cluster]",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			return fmt.Errorf("subcommand is required")
 		},
 	}
-	cmd.AddCommand(cluster.NewCommand(ctx))
+	cmd.AddCommand(cluster.NewCommand(logger))
 	return cmd
 }

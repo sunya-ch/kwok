@@ -14,32 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package consts defines the constants for building the project.
 package consts
 
+import (
+	"runtime"
+)
+
 var (
-	ProjectName = "kwok"
-	ConfigName  = "kwok.yaml"
-
 	Version      = "unknown"
-	BinaryPrefix = "https://github.com/kubernetes-sigs/kwok/releases/download"
+	KubeVersion  = "unknown"
 	ImagePrefix  = "registry.k8s.io/kwok"
-
-	KubeVersion      = "unknown"
-	KubeBinaryPrefix = "https://dl.k8s.io/release"
-	KubeImagePrefix  = "registry.k8s.io"
-
-	EtcdBinaryPrefix = "https://github.com/etcd-io/etcd/releases/download"
-
-	DockerComposeVersion      = "2.13.0"
-	DockerComposeBinaryPrefix = "https://github.com/docker/compose/releases/download"
-
-	KindVersion      = "0.17.0"
-	KindBinaryPrefix = "https://github.com/kubernetes-sigs/kind/releases/download"
-
-	PrometheusVersion      = "2.35.0"
-	PrometheusBinaryPrefix = "https://github.com/prometheus/prometheus/releases/download"
-	PrometheusImagePrefix  = "docker.io/prom"
-
-	KindNodeImagePrefix = "docker.io/kindest"
+	BinaryPrefix = "https://github.com/kubernetes-sigs/kwok/releases/download"
+	BinaryName   = "kwok-" + runtime.GOOS + "-" + runtime.GOARCH
 )

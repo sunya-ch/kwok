@@ -24,7 +24,6 @@ function check_ends() {
     -iname "*.md" \
     -o -iname "*.sh" \
     -o -iname "*.go" \
-    -o -iname "*.tpl" \
     -o -iname "*.yaml" \
     -o -iname "*.yml" |
     xargs -I {} bash -c "[ -n \"\$(tail -c 1 {})\" ] && echo {}" || :

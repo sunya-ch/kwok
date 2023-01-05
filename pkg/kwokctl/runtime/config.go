@@ -21,19 +21,67 @@ import (
 	"io"
 	"time"
 
-	"sigs.k8s.io/kwok/pkg/apis/internalversion"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
 )
 
-type Runtime interface {
-	// SetConfig sets the config of cluster
-	SetConfig(ctx context.Context, conf *internalversion.KwokctlConfiguration) error
+type Config struct {
+	Name                      string `json:"name,omitempty"`
+	Workdir                   string `json:"workdir,omitempty"`
+	Runtime                   string `json:"runtime,omitempty"`
+	EtcdPort                  uint32 `json:"etcd_port,omitempty"`
+	EtcdPeerPort              uint32 `json:"etcd_peer_port,omitempty"`
+	KubeApiserverPort         uint32 `json:"kube_apiserver_port,omitempty"`
+	KubeControllerManagerPort uint32 `json:"kube_controller_manager_port,omitempty"`
+	KubeSchedulerPort         uint32 `json:"kube_scheduler_port,omitempty"`
+	KwokControllerPort        uint32 `json:"kwok_controller_port,omitempty"`
+	PrometheusPort            uint32 `json:"prometheus_port,omitempty"`
 
-	// Save the config of cluster
-	Save(ctx context.Context) error
+	// For docker-compose
+	EtcdImage                  string `json:"etcd_image,omitempty"`
+	KubeApiserverImage         string `json:"kube_apiserver_image,omitempty"`
+	KubeControllerManagerImage string `json:"kube_controller_manager_image,omitempty"`
+	KubeSchedulerImage         string `json:"kube_scheduler_image,omitempty"`
+	KwokControllerImage        string `json:"kwok_controller_image,omitempty"`
+	PrometheusImage            string `json:"prometheus_image,omitempty"`
+
+	// For kind
+	KindNodeImage string `json:"kind_node_image,omitempty"`
+
+	// For binary
+	KubeApiserverBinary         string `json:"kube_apiserver_binary,omitempty"`
+	KubeControllerManagerBinary string `json:"kube_controller_manager_binary,omitempty"`
+	KubeSchedulerBinary         string `json:"kube_scheduler_binary,omitempty"`
+	KwokControllerBinary        string `json:"kwok_controller_binary,omitempty"`
+	EtcdBinary                  string `json:"etcd_binary,omitempty"`
+	EtcdBinaryTar               string `json:"etcd_binary_tar,omitempty"`
+	PrometheusBinary            string `json:"prometheus_binary,omitempty"`
+	PrometheusBinaryTar         string `json:"prometheus_binary_tar,omitempty"`
+
+	// Cache directory
+	CacheDir string `json:"cache_dir,omitempty"`
+
+	// For docker-compose and binary
+	SecretPort bool `json:"secret_port,omitempty"`
+
+	// Pull image
+	QuietPull bool `json:"quiet_pull,omitempty"`
+
+	// Feature gates of Kubernetes
+	FeatureGates string `json:"kube_feature_gates,omitempty"`
+
+	// For audit log
+	AuditPolicy string `json:"audit_policy,omitempty"`
+
+	// Runtime config of Kubernetes
+	RuntimeConfig string `json:"kube_runtime_config,omitempty"`
+}
+
+type Runtime interface {
+	// Init the config of cluster
+	Init(ctx context.Context, conf Config) error
 
 	// Config return the config of cluster
-	Config(ctx context.Context) (*internalversion.KwokctlConfiguration, error)
+	Config() (Config, error)
 
 	// Install the cluster
 	Install(ctx context.Context) error
@@ -63,13 +111,10 @@ type Runtime interface {
 	InHostKubeconfig() (string, error)
 
 	// Kubectl command
-	Kubectl(ctx context.Context, stm exec.IOStreams, args ...string) error
+	Kubectl(ctx context.Context, stm utils.IOStreams, args ...string) error
 
 	// KubectlInCluster command in cluster
-	KubectlInCluster(ctx context.Context, stm exec.IOStreams, args ...string) error
-
-	// EtcdctlInCluster command in cluster
-	EtcdctlInCluster(ctx context.Context, stm exec.IOStreams, args ...string) error
+	KubectlInCluster(ctx context.Context, stm utils.IOStreams, args ...string) error
 
 	// Logs logs of a component
 	Logs(ctx context.Context, name string, out io.Writer) error
@@ -84,10 +129,10 @@ type Runtime interface {
 	AuditLogsFollow(ctx context.Context, out io.Writer) error
 
 	// ListBinaries list binaries in the cluster
-	ListBinaries(ctx context.Context) ([]string, error)
+	ListBinaries(ctx context.Context, actual bool) ([]string, error)
 
 	// ListImages list images in the cluster
-	ListImages(ctx context.Context) ([]string, error)
+	ListImages(ctx context.Context, actual bool) ([]string, error)
 
 	// SnapshotSave save the snapshot of cluster
 	SnapshotSave(ctx context.Context, path string) error

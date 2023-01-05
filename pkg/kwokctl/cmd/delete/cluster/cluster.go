@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package cluster contains a command to delete a cluster.
 package cluster
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/path"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 type flagpole struct {
@@ -33,45 +33,40 @@ type flagpole struct {
 }
 
 // NewCommand returns a new cobra.Command for cluster creation
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	flags := &flagpole{}
-
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "cluster",
 		Short: "Deletes a cluster",
 		Long:  "Deletes a cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags.Name = config.DefaultCluster
-			return runE(cmd.Context(), flags)
+			flags.Name = vars.DefaultCluster
+			return runE(cmd.Context(), logger, flags)
 		},
 	}
 	return cmd
 }
 
-func runE(ctx context.Context, flags *flagpole) error {
-	name := config.ClusterName(flags.Name)
-	workdir := path.Join(config.ClustersDir, flags.Name)
+func runE(ctx context.Context, logger logger.Logger, flags *flagpole) error {
+	name := fmt.Sprintf("%s-%s", vars.ProjectName, flags.Name)
+	workdir := utils.PathJoin(vars.ClustersDir, flags.Name)
 
-	logger := log.FromContext(ctx)
-	logger = logger.With("cluster", flags.Name)
-	ctx = log.NewContext(ctx, logger)
-
-	rt, err := runtime.DefaultRegistry.Load(ctx, name, workdir)
+	rt, err := runtime.DefaultRegistry.Load(name, workdir, logger)
 	if err != nil {
 		return err
 	}
-	logger.Info("Stopping cluster")
+	logger.Printf("Stopping cluster %q", name)
 	err = rt.Down(ctx)
 	if err != nil {
-		logger.Error("Stopping cluster", err)
+		logger.Printf("Error stopping cluster %q: %v", name, err)
 	}
 
-	logger.Info("Deleting cluster")
+	logger.Printf("Deleting cluster %q", name)
 	err = rt.Uninstall(ctx)
 	if err != nil {
 		return err
 	}
-	logger.Info("Cluster deleted")
+	logger.Printf("Cluster %q deleted", name)
 	return nil
 }

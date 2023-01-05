@@ -17,40 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"log"
 	"os"
-
-	"github.com/spf13/pflag"
-
-	"sigs.k8s.io/kwok/pkg/config"
-	"sigs.k8s.io/kwok/pkg/kwokctl/cmd"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/signals"
 
 	_ "sigs.k8s.io/kwok/pkg/kwokctl/runtime/binary"
 	_ "sigs.k8s.io/kwok/pkg/kwokctl/runtime/compose"
 	_ "sigs.k8s.io/kwok/pkg/kwokctl/runtime/kind"
+
+	"sigs.k8s.io/kwok/pkg/kwokctl/cmd"
 )
 
 func main() {
-	flagset := pflag.NewFlagSet("global", pflag.ContinueOnError)
-	flagset.ParseErrorsWhitelist.UnknownFlags = true
-	flagset.Usage = func() {}
-
-	ctx := signals.SetupSignalContext()
-	ctx, logger := log.InitFlags(ctx, flagset)
-
-	ctx, err := config.InitFlags(ctx, flagset)
+	logger := log.New(os.Stdout, "", 0)
+	command := cmd.NewCommand(logger)
+	err := command.Execute()
 	if err != nil {
-		_, _ = os.Stderr.Write([]byte(flagset.FlagUsages()))
-		logger.Error("Init config flags", err)
-		os.Exit(1)
-	}
-
-	command := cmd.NewCommand(ctx)
-	command.PersistentFlags().AddFlagSet(flagset)
-	err = command.ExecuteContext(ctx)
-	if err != nil {
-		logger.Error("Execute exit", err)
 		os.Exit(1)
 	}
 }

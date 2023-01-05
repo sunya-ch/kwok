@@ -14,51 +14,45 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package cmd defines a root command for the kwokctl.
 package cmd
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
-	"sigs.k8s.io/kwok/pkg/consts"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/create"
 	del "sigs.k8s.io/kwok/pkg/kwokctl/cmd/delete"
-	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/etcdctl"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/get"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/kubectl"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/logs"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/snapshot"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 // NewCommand returns a new cobra.Command for root
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
-		Args:          cobra.NoArgs,
-		Use:           "kwokctl [command]",
-		Short:         "Kwokctl is a Kwok cluster management tool",
-		Long:          "Kwokctl is a Kwok cluster management tool",
-		Version:       consts.Version,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:  cobra.NoArgs,
+		Use:   "kwokctl [command]",
+		Short: "Kwokctl is a Kwok cluster management tool",
+		Long:  "Kwokctl is a Kwok cluster management tool",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			return fmt.Errorf("subcommand is required")
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&config.DefaultCluster, "name", config.DefaultCluster, "cluster name")
+	cmd.PersistentFlags().StringVar(&vars.DefaultCluster, "name", vars.DefaultCluster, "cluster name")
 	cmd.TraverseChildren = true
 
 	cmd.AddCommand(
-		create.NewCommand(ctx),
-		del.NewCommand(ctx),
-		get.NewCommand(ctx),
-		kubectl.NewCommand(ctx),
-		etcdctl.NewCommand(ctx),
-		logs.NewCommand(ctx),
-		snapshot.NewCommand(ctx),
+		create.NewCommand(logger),
+		del.NewCommand(logger),
+		get.NewCommand(logger),
+		kubectl.NewCommand(logger),
+		logs.NewCommand(logger),
+		snapshot.NewCommand(logger),
 	)
 	return cmd
 }

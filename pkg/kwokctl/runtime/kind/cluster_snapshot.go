@@ -20,36 +20,38 @@ import (
 	"context"
 	"os"
 
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/file"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
 )
 
 // SnapshotSave save the snapshot of cluster
 func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
-	etcdContainerName := c.getComponentName("etcd")
-
-	kindName := c.getClusterName()
-
-	logger := log.FromContext(ctx)
+	etcdContainerName, err := c.getComponentName("etcd")
+	if err != nil {
+		return err
+	}
+	kindName, err := c.getClusterName()
+	if err != nil {
+		return err
+	}
 
 	// Save to /var/lib/etcd/snapshot.db on container of Kind use Kubectl
 	// Why this path, etcd is just the volume /var/lib/etcd/ in container of Kind.
 	tmpFile := "/var/lib/etcd/snapshot.db"
-	err := c.KubectlInCluster(ctx, exec.IOStreams{}, "exec", "-i", "-n", "kube-system", etcdContainerName, "--", "etcdctl", "snapshot", "save", tmpFile, "--endpoints=127.0.0.1:2379", "--cert=/etc/kubernetes/pki/etcd/server.crt", "--key=/etc/kubernetes/pki/etcd/server.key", "--cacert=/etc/kubernetes/pki/etcd/ca.crt")
+	err = c.KubectlInCluster(ctx, utils.IOStreams{}, "exec", "-i", "-n", "kube-system", etcdContainerName, "--", "etcdctl", "snapshot", "save", tmpFile, "--endpoints=127.0.0.1:2379", "--cert=/etc/kubernetes/pki/etcd/server.crt", "--key=/etc/kubernetes/pki/etcd/server.key", "--cacert=/etc/kubernetes/pki/etcd/ca.crt")
 	if err != nil {
 		return err
 	}
 	defer func() {
-		err = exec.Exec(ctx, "", exec.IOStreams{}, "docker", "exec", "-i", kindName, "rm", "-f", tmpFile)
+		err = utils.Exec(ctx, "", utils.IOStreams{}, "docker", "exec", "-i", kindName, "rm", "-f", tmpFile)
 		if err != nil {
-			logger.Error("Failed to clean snapshot", err)
+			c.Logger().Printf("failed to clean snapshot: %v", err)
 		}
 	}()
 
 	// Copy to host path from container of Kind use Docker
 	// Etcd image does not have `tar`, can't use `kubectl cp`, so we use `docker cp` instead
-	err = exec.Exec(ctx, "", exec.IOStreams{}, "docker", "cp", kindName+":"+tmpFile, path)
+	err = utils.Exec(ctx, "", utils.IOStreams{}, "docker", "cp", kindName+":"+tmpFile, path)
 	if err != nil {
 		return err
 	}
@@ -59,48 +61,47 @@ func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
 
 // SnapshotRestore restore the snapshot of cluster
 func (c *Cluster) SnapshotRestore(ctx context.Context, path string) error {
-	config, err := c.Config(ctx)
+
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
-	conf := &config.Options
-
-	kindName := c.getClusterName()
-
-	etcdctlPath := c.GetBinPath("etcdctl" + conf.BinSuffix)
-
-	err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+conf.BinSuffix, 0755, conf.QuietPull, true)
+	kindName, err := c.getClusterName()
 	if err != nil {
 		return err
 	}
 
-	logger := log.FromContext(ctx)
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	etcdctlPath := utils.PathJoin(bin, "etcdctl"+vars.BinSuffix)
+
+	err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+vars.BinSuffix, 0755, conf.QuietPull, true)
+	if err != nil {
+		return err
+	}
+
 	err = c.Stop(ctx, "etcd")
 	if err != nil {
-		logger.Error("Failed to stop etcd", err)
+		c.Logger().Printf("Failed to stop etcd: %v", err)
 	}
 	defer func() {
 		err = c.Start(ctx, "etcd")
 		if err != nil {
-			logger.Error("Failed to start etcd", err)
+			c.Logger().Printf("Failed to start etcd: %v", err)
 		}
 	}()
 
 	// Restore snapshot to host temporary directory
-	etcdDataTmp := c.GetWorkdirPath("etcd")
-	err = exec.Exec(ctx, "", exec.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
+	etcdDataTmp := utils.PathJoin(conf.Workdir, "etcd")
+	err = utils.Exec(ctx, "", utils.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		err = os.RemoveAll(etcdDataTmp)
-		if err != nil {
-			logger.Error("Failed to clear etcd temporary data", err)
-		}
+		os.RemoveAll(etcdDataTmp)
 	}()
 
 	// Copy to kind container from host temporary directory
-	err = exec.Exec(ctx, "", exec.IOStreams{}, "docker", "cp", etcdDataTmp, kindName+":/var/lib/")
+	err = utils.Exec(ctx, "", utils.IOStreams{}, "docker", "cp", etcdDataTmp, kindName+":/var/lib/")
 	if err != nil {
 		return err
 	}

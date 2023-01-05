@@ -35,42 +35,16 @@ function args() {
   done
 }
 
-function show_info() {
-    local name="${1}"
-    echo kwokctl get clusters
-    kwokctl get clusters
-    echo
-    echo kwokctl --name="${name}" kubectl get pod -o wide --all-namespaces
-    kwokctl --name="${name}" kubectl get pod -o wide --all-namespaces
-    echo
-    echo kwokctl --name="${name}" logs etcd
-    kwokctl --name="${name}" logs etcd
-    echo
-    echo kwokctl --name="${name}" logs kube-apiserver
-    kwokctl --name="${name}" logs kube-apiserver
-    echo
-    echo kwokctl --name="${name}" logs kube-controller-manager
-    kwokctl --name="${name}" logs kube-controller-manager
-    echo
-    echo kwokctl --name="${name}" logs kube-scheduler
-    kwokctl --name="${name}" logs kube-scheduler
-    echo
-    echo kwokctl --name="${name}" logs kwok-controller
-    kwokctl --name="${name}" logs kwok-controller
-    echo
-}
-
 function test_create_cluster() {
   local release="${1}"
   local name="${2}"
   local targets
   local i
 
-  KWOK_KUBE_VERSION="${release}" kwokctl -v=-4 create cluster --name "${name}" --timeout 10m --wait 10m --quiet-pull --prometheus-port 9090
+  KWOK_KUBE_VERSION="${release}" kwokctl create cluster --name "${name}" --quiet-pull --prometheus-port 9090
   if [[ $? -ne 0 ]]; then
     echo "Error: Cluster ${name} creation failed"
-    show_info "${name}"
-    return 1
+    exit 1
   fi
 
   for ((i = 0; i < 30; i++)); do
@@ -86,13 +60,18 @@ function test_create_cluster() {
 
   if ! kwokctl --name="${name}" kubectl get pod | grep Running >/dev/null 2>&1; then
     echo "Error: cluster not ready"
-    show_info "${name}"
-    return 1
-  fi
-
-  if ! kwokctl --name="${name}" etcdctl get /registry/namespaces/default --keys-only | grep default >/dev/null 2>&1; then
-    echo "Error: Failed to get namespace(default) by kwokctl etcdctl in cluster ${name}"
-    show_info "${name}"
+    echo kwokctl --name="${name}" logs kube-apiserver
+    kwokctl --name="${name}" logs kube-apiserver
+    echo
+    echo kwokctl --name="${name}" logs kube-controller-manager
+    kwokctl --name="${name}" logs kube-controller-manager
+    echo
+    echo kwokctl --name="${name}" logs kube-scheduler
+    kwokctl --name="${name}" logs kube-scheduler
+    echo
+    echo kwokctl --name="${name}" logs kwok-controller
+    kwokctl --name="${name}" logs kwok-controller
+    echo
     return 1
   fi
 }

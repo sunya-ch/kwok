@@ -17,12 +17,13 @@ limitations under the License.
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"sort"
+
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
-type BuildRuntime func(name, workdir string) (Runtime, error)
+type BuildRuntime func(name, workdir string, logger logger.Logger) (Runtime, error)
 
 var DefaultRegistry = NewRegistry()
 
@@ -48,24 +49,22 @@ func (r *Registry) Get(name string) (BuildRuntime, bool) {
 }
 
 // Load a runtime
-func (r *Registry) Load(ctx context.Context, name, workdir string) (Runtime, error) {
-	cluster := NewCluster(name, workdir)
-	config, err := cluster.Load(ctx)
+func (r *Registry) Load(name, workdir string, logger logger.Logger) (Runtime, error) {
+	cluster := NewCluster(name, workdir, logger)
+	conf, err := cluster.Load()
 	if err != nil {
 		return nil, err
 	}
-	conf := &config.Options
-
 	buildRuntime, ok := r.Get(conf.Runtime)
 	if !ok {
 		return nil, fmt.Errorf("not found runtime %q", conf.Runtime)
 	}
-	return buildRuntime(name, workdir)
+	return buildRuntime(name, workdir, logger)
 }
 
 // List all registered runtime
 func (r *Registry) List() []string {
-	items := make([]string, 0, len(r.items))
+	var items []string
 	for name := range r.items {
 		items = append(items, name)
 	}

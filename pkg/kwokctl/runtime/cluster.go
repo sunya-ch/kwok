@@ -19,26 +19,21 @@ package runtime
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
-	"github.com/nxadm/tail"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 
-	"sigs.k8s.io/kwok/pkg/apis/internalversion"
-	"sigs.k8s.io/kwok/pkg/config"
-	"sigs.k8s.io/kwok/pkg/consts"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/file"
-	"sigs.k8s.io/kwok/pkg/utils/path"
+	"github.com/nxadm/tail"
+	"sigs.k8s.io/yaml"
 )
 
 var (
-	ConfigName              = consts.ConfigName
+	RawClusterConfigName    = "kwok.yaml"
 	InHostKubeconfigName    = "kubeconfig.yaml"
 	InClusterKubeconfigName = "kubeconfig"
 	EtcdDataDirName         = "etcd"
@@ -46,7 +41,7 @@ var (
 	ComposeName             = "docker-compose.yaml"
 	Prometheus              = "prometheus.yaml"
 	KindName                = "kind.yaml"
-	KwokPod                 = "kwok-controller-pod.yaml"
+	KwokDeploy              = "kwok-controller-deployment.yaml"
 	PrometheusDeploy        = "prometheus-deployment.yaml"
 	AuditPolicyName         = "audit.yaml"
 	AuditLogName            = "audit.log"
@@ -55,100 +50,87 @@ var (
 type Cluster struct {
 	workdir string
 	name    string
-	conf    *internalversion.KwokctlConfiguration
+	conf    *Config
+	logger  logger.Logger
 }
 
-func NewCluster(name, workdir string) *Cluster {
+func NewCluster(name, workdir string, logger logger.Logger) *Cluster {
 	return &Cluster{
 		name:    name,
 		workdir: workdir,
+		logger:  logger,
 	}
 }
 
-func (c *Cluster) Config(ctx context.Context) (*internalversion.KwokctlConfiguration, error) {
+func (c *Cluster) Logger() logger.Logger {
+	return c.logger
+}
+
+func (c *Cluster) Config() (Config, error) {
 	if c.conf != nil {
-		return c.conf, nil
+		return *c.conf, nil
 	}
-	conf, err := c.Load(ctx)
+	conf, err := c.Load()
 	if err != nil {
 		return conf, err
 	}
-	c.conf = conf
+	c.conf = &conf
 	return conf, nil
 }
 
-func (c *Cluster) Name() string {
-	return c.name
-}
-
-func (c *Cluster) Workdir() string {
-	return c.workdir
-}
-
-func (c *Cluster) Load(ctx context.Context) (*internalversion.KwokctlConfiguration, error) {
-	objs, err := config.Load(ctx, c.GetWorkdirPath(ConfigName))
+func (c *Cluster) Load() (conf Config, err error) {
+	file, err := os.ReadFile(utils.PathJoin(c.workdir, RawClusterConfigName))
 	if err != nil {
-		return nil, err
+		return conf, err
 	}
-
-	configs := config.FilterWithType[*internalversion.KwokctlConfiguration](objs)
-	if len(configs) == 0 {
-		return nil, fmt.Errorf("failed to load config")
+	err = yaml.Unmarshal(file, &conf)
+	if err != nil {
+		return conf, err
 	}
-	return configs[0], nil
+	return conf, nil
 }
 
 func (c *Cluster) InHostKubeconfig() (string, error) {
-	return c.GetWorkdirPath(InHostKubeconfigName), nil
+	conf, err := c.Config()
+	if err != nil {
+		return "", err
+	}
+
+	return utils.PathJoin(conf.Workdir, InHostKubeconfigName), nil
 }
 
-func (c *Cluster) SetConfig(ctx context.Context, conf *internalversion.KwokctlConfiguration) error {
-	c.conf = conf
+func (c *Cluster) Init(ctx context.Context, conf Config) error {
+	return c.Update(ctx, conf)
+}
+
+func (c *Cluster) Update(ctx context.Context, conf Config) error {
+	config, err := yaml.Marshal(conf)
+	if err != nil {
+		return err
+	}
+	err = os.MkdirAll(c.workdir, 0755)
+	if err != nil {
+		return err
+	}
+	c.conf = &conf
+
+	err = os.WriteFile(utils.PathJoin(c.workdir, RawClusterConfigName), config, 0644)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (c *Cluster) Save(ctx context.Context) error {
-	if c.conf == nil {
-		return nil
-	}
-
-	objs := []metav1.Object{
-		c.conf,
-	}
-
-	others := config.FilterWithoutTypeFromContext[*internalversion.KwokctlConfiguration](ctx)
-	if len(others) != 0 {
-		objs = append(objs, others...)
-	}
-
-	err := config.Save(ctx, c.GetWorkdirPath(ConfigName), objs)
+func (c *Cluster) Install(ctx context.Context) error {
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	return nil
-}
+	bin := utils.PathJoin(conf.Workdir, "bin")
 
-func (c *Cluster) kubectlPath(ctx context.Context) (string, error) {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return "", err
-	}
-	conf := &config.Options
-
-	kubectlPath, err := exec.LookPath("kubectl")
-	if err != nil {
-		kubectlPath = c.GetBinPath("kubectl" + conf.BinSuffix)
-		err = file.DownloadWithCache(ctx, conf.CacheDir, conf.KubectlBinary, kubectlPath, 0755, conf.QuietPull)
-		if err != nil {
-			return "", err
-		}
-	}
-	return kubectlPath, nil
-}
-
-func (c *Cluster) Install(ctx context.Context) error {
-	_, err := c.kubectlPath(ctx)
+	kubectlPath := utils.PathJoin(bin, "kubectl"+vars.BinSuffix)
+	err = utils.DownloadWithCache(ctx, conf.CacheDir, vars.MustKubectlBinary, kubectlPath, 0755, conf.QuietPull)
 	if err != nil {
 		return err
 	}
@@ -156,131 +138,116 @@ func (c *Cluster) Install(ctx context.Context) error {
 }
 
 func (c *Cluster) Uninstall(ctx context.Context) error {
+	conf, err := c.Config()
+	if err != nil {
+		return err
+	}
+
 	// cleanup workdir
-	return os.RemoveAll(c.Workdir())
+	os.RemoveAll(conf.Workdir)
+	return nil
 }
 
 func (c *Cluster) Ready(ctx context.Context) (bool, error) {
 	out := bytes.NewBuffer(nil)
-	err := c.KubectlInCluster(ctx, exec.IOStreams{
+	err := c.KubectlInCluster(ctx, utils.IOStreams{
 		Out:    out,
 		ErrOut: out,
-	}, "get", "--raw", "/healthz")
+	}, "get", "ns")
 	if err != nil {
 		return false, err
-	}
-	if !bytes.Equal(out.Bytes(), []byte("ok")) {
-		logger := log.FromContext(ctx)
-		logger.Debug("Check Ready",
-			"method", "get /healthz",
-			"response", out,
-		)
-		return false, nil
 	}
 	return true, nil
 }
 
 func (c *Cluster) WaitReady(ctx context.Context, timeout time.Duration) error {
-	var (
-		err     error
-		waitErr error
-		ready   bool
-	)
-	logger := log.FromContext(ctx)
-	waitErr = wait.PollImmediateWithContext(ctx, time.Second, timeout, func(ctx context.Context) (bool, error) {
+	var err error
+	var ready bool
+	for i := 0; i < int(timeout/time.Second); i++ {
 		ready, err = c.Ready(ctx)
-		if err != nil {
-			logger.Debug("Cluster is not ready",
-				"err", err,
-			)
+		if ready {
+			return nil
 		}
-		return ready, nil
-	})
-	if err != nil {
-		return err
+		time.Sleep(time.Second)
 	}
-	if waitErr != nil {
-		return waitErr
-	}
-	return nil
+	return err
 }
 
-func (c *Cluster) Kubectl(ctx context.Context, stm exec.IOStreams, args ...string) error {
-	kubectlPath, err := c.kubectlPath(ctx)
+func (c *Cluster) Kubectl(ctx context.Context, stm utils.IOStreams, args ...string) error {
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	return exec.Exec(ctx, "", stm, kubectlPath, args...)
+	kubectlPath, err := exec.LookPath("kubectl")
+	if err != nil {
+		bin := utils.PathJoin(conf.Workdir, "bin")
+		kubectlPath = utils.PathJoin(bin, "kubectl"+vars.BinSuffix)
+		err = utils.DownloadWithCache(ctx, conf.CacheDir, vars.MustKubectlBinary, kubectlPath, 0755, conf.QuietPull)
+		if err != nil {
+			return err
+		}
+	}
+	return utils.Exec(ctx, "", stm, kubectlPath, args...)
 }
 
-func (c *Cluster) KubectlInCluster(ctx context.Context, stm exec.IOStreams, args ...string) error {
-	kubectlPath, err := c.kubectlPath(ctx)
+func (c *Cluster) KubectlInCluster(ctx context.Context, stm utils.IOStreams, args ...string) error {
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	return exec.Exec(ctx, "", stm, kubectlPath,
-		append([]string{"--kubeconfig", c.GetWorkdirPath(InHostKubeconfigName)}, args...)...)
+	kubectlPath, err := exec.LookPath("kubectl")
+	if err != nil {
+		bin := utils.PathJoin(conf.Workdir, "bin")
+		kubectlPath = utils.PathJoin(bin, "kubectl"+vars.BinSuffix)
+		err = utils.DownloadWithCache(ctx, conf.CacheDir, vars.MustKubectlBinary, kubectlPath, 0755, conf.QuietPull)
+		if err != nil {
+			return err
+		}
+	}
+
+	return utils.Exec(ctx, "", stm, kubectlPath,
+		append([]string{"--kubeconfig", utils.PathJoin(conf.Workdir, InHostKubeconfigName)}, args...)...)
 }
 
 func (c *Cluster) AuditLogs(ctx context.Context, out io.Writer) error {
-	logs := c.GetLogPath(AuditLogName)
+	conf, err := c.Config()
+	if err != nil {
+		return err
+	}
+
+	logs := utils.PathJoin(conf.Workdir, "logs", AuditLogName)
 
 	f, err := os.OpenFile(logs, os.O_RDONLY, 0644)
 	if err != nil {
 		return err
 	}
-	logger := log.FromContext(ctx)
-	defer func() {
-		err = f.Close()
-		if err != nil {
-			logger.Error("Failed to close file", err)
-		}
-	}()
+	defer f.Close()
 
-	_, err = io.Copy(out, f)
-	if err != nil {
-		return err
-	}
+	io.Copy(out, f)
 	return nil
 }
 
 func (c *Cluster) AuditLogsFollow(ctx context.Context, out io.Writer) error {
-	logs := c.GetLogPath(AuditLogName)
+	conf, err := c.Config()
+	if err != nil {
+		return err
+	}
+
+	logs := utils.PathJoin(conf.Workdir, "logs", AuditLogName)
 
 	t, err := tail.TailFile(logs, tail.Config{ReOpen: true, Follow: true})
 	if err != nil {
 		return err
 	}
-	logger := log.FromContext(ctx)
-	defer func() {
-		err = t.Stop()
-		if err != nil {
-			logger.Error("Failed to stop tail file", err)
-		}
-	}()
+	defer t.Stop()
 
 	go func() {
 		for line := range t.Lines {
-			_, err = out.Write([]byte(line.Text + "\n"))
-			if err != nil {
-				logger.Error("Failed to write line text", err)
-			}
+			out.Write([]byte(line.Text + "\n"))
 		}
 	}()
 	<-ctx.Done()
 	return nil
-}
-
-func (c *Cluster) GetWorkdirPath(name string) string {
-	return path.Join(c.workdir, name)
-}
-
-func (c *Cluster) GetBinPath(name string) string {
-	return path.Join(c.workdir, "bin", name)
-}
-
-func (c *Cluster) GetLogPath(name string) string {
-	return path.Join(c.workdir, "logs", name)
 }

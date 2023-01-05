@@ -17,12 +17,11 @@ limitations under the License.
 package k8s
 
 import (
-	"math"
 	"os"
 	"runtime"
 )
 
-// lists from https://github.com/kubernetes/kubernetes/blob/70617042976dc168208a41b8a10caa61f9748617/cmd/kubeadm/app/constants/constants.go#L469
+// lists from https://github.com/kubernetes/kubernetes/blob/2d7dcf928c3e0e8dd4c29c421893a299e1a1b857/cmd/kubeadm/app/constants/constants.go#L491
 var etcdVersions = map[int]string{
 	8:  "3.0.17",
 	9:  "3.1.12",
@@ -38,38 +37,23 @@ var etcdVersions = map[int]string{
 	19: "3.4.13-0",
 	20: "3.4.13-0",
 	21: "3.4.13-0",
-	22: "3.5.6-0",
-	23: "3.5.6-0",
-	24: "3.5.6-0",
-	25: "3.5.6-0",
+	22: "3.5.4-0",
+	23: "3.5.4-0",
+	24: "3.5.4-0",
+	25: "3.5.4-0",
 }
 
 func GetEtcdVersion(version int) string {
-	if version < 0 {
-		return "unknown"
+	if version < 8 {
+		version = 8
 	}
-	v, ok := etcdVersions[version]
-	if ok {
-		return v
-	}
-	min, max := math.MaxInt, 0
-	for k := range etcdVersions {
-		if k < min {
-			min = k
-		}
-		if k > max {
-			max = k
-		}
-	}
-	if version > max {
-		version = max
-	} else if version < min {
-		version = min
+	if version > 25 {
+		version = 25
 	}
 	return etcdVersions[version]
 }
 
 func init() {
-	_ = os.Setenv("ETCD_UNSUPPORTED_ARCH", runtime.GOARCH)
-	_ = os.Setenv("ETCDCTL_API", "3")
+	os.Setenv("ETCD_UNSUPPORTED_ARCH", runtime.GOARCH)
+	os.Setenv("ETCDCTL_API", "3")
 }

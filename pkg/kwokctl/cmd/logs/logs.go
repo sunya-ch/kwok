@@ -14,19 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package logs contains a command to log a component of a cluster.
 package logs
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/path"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 type flagpole struct {
@@ -35,32 +35,27 @@ type flagpole struct {
 }
 
 // NewCommand returns a new cobra.Command for getting the list of clusters
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	flags := &flagpole{}
-
 	cmd := &cobra.Command{
 		Args:  cobra.ExactArgs(1),
 		Use:   "logs",
 		Short: "Logs one of [audit, etcd, kube-apiserver, kube-controller-manager, kube-scheduler, kwok-controller, prometheus]",
 		Long:  "Logs one of [audit, etcd, kube-apiserver, kube-controller-manager, kube-scheduler, kwok-controller, prometheus]",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags.Name = config.DefaultCluster
-			return runE(cmd.Context(), flags, args)
+			flags.Name = vars.DefaultCluster
+			return runE(cmd.Context(), logger, flags, args)
 		},
 	}
 	cmd.Flags().BoolVarP(&flags.Follow, "follow", "f", false, "Specify if the logs should be streamed")
 	return cmd
 }
 
-func runE(ctx context.Context, flags *flagpole, args []string) error {
-	name := config.ClusterName(flags.Name)
-	workdir := path.Join(config.ClustersDir, flags.Name)
+func runE(ctx context.Context, logger logger.Logger, flags *flagpole, args []string) error {
+	name := fmt.Sprintf("%s-%s", vars.ProjectName, flags.Name)
+	workdir := utils.PathJoin(vars.ClustersDir, flags.Name)
 
-	logger := log.FromContext(ctx)
-	logger = logger.With("cluster", flags.Name)
-	ctx = log.NewContext(ctx, logger)
-
-	rt, err := runtime.DefaultRegistry.Load(ctx, name, workdir)
+	rt, err := runtime.DefaultRegistry.Load(name, workdir, logger)
 	if err != nil {
 		return err
 	}

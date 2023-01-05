@@ -1,0 +1,144 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: multi-nicd-test
+  generateName: multi-nicd-
+  labels:
+    app: multi-nicd
+spec:
+  restartPolicy: Always
+  serviceAccountName: multi-nic-cni-operator-controller-manager
+  hostNetwork: true
+  enableServiceLinks: true
+  nodeName: kwok-node-0
+  containers:
+    - resources:
+        requests:
+          cpu: 100m
+          memory: 50Mi
+      terminationMessagePath: /dev/termination-log
+      name: multi-nicd
+      env:
+        - name: DAEMON_PORT
+          value: '11000'
+        - name: RT_TABLE_PATH
+          value: /opt/rt_tables
+      securityContext:
+        privileged: true
+      ports:
+        - hostPort: 11000
+          containerPort: 11000
+          protocol: TCP
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: cnibin
+          mountPath: /host/opt/cni/bin
+        - name: device-plugin
+          mountPath: /var/lib/kubelet/device-plugins
+        - name: rt-tables
+          mountPath: /opt/rt_tables
+        - name: kube-api-access-5xgkx
+          readOnly: true
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      terminationMessagePolicy: File
+      image: 'ghcr.io/foundation-model-stack/multi-nic-cni-daemon:v1.0.2'
+  serviceAccount: multi-nic-cni-operator-controller-manager
+  volumes:
+    - name: cnibin
+      hostPath:
+        path: /var/lib/cni/bin
+        type: ''
+    - name: device-plugin
+      hostPath:
+        path: /var/lib/kubelet/device-plugins
+        type: ''
+    - name: rt-tables
+      hostPath:
+        path: /etc/iproute2/rt_tables
+        type: ''
+    - name: kube-api-access-5xgkx
+      projected:
+        sources:
+          - serviceAccountToken:
+              expirationSeconds: 3607
+              path: token
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+                - key: ca.crt
+                  path: ca.crt
+          - downwardAPI:
+              items:
+                - path: namespace
+                  fieldRef:
+                    apiVersion: v1
+                    fieldPath: metadata.namespace
+          - configMap:
+              name: openshift-service-ca.crt
+              items:
+                - key: service-ca.crt
+                  path: service-ca.crt
+        defaultMode: 420
+  dnsPolicy: ClusterFirst
+  tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+    - key: node.kubernetes.io/disk-pressure
+      operator: Exists
+      effect: NoSchedule
+    - key: node.kubernetes.io/memory-pressure
+      operator: Exists
+      effect: NoSchedule
+    - key: node.kubernetes.io/pid-pressure
+      operator: Exists
+      effect: NoSchedule
+    - key: node.kubernetes.io/unschedulable
+      operator: Exists
+      effect: NoSchedule
+    - key: node.kubernetes.io/network-unavailable
+      operator: Exists
+      effect: NoSchedule
+status:
+  phase: Running
+  conditions:
+    - type: Initialized
+      status: 'True'
+      lastProbeTime: null
+      lastTransitionTime: '2022-12-09T09:49:52Z'
+    - type: Ready
+      status: 'True'
+      lastProbeTime: null
+      lastTransitionTime: '2022-12-09T09:49:53Z'
+    - type: ContainersReady
+      status: 'True'
+      lastProbeTime: null
+      lastTransitionTime: '2022-12-09T09:49:53Z'
+    - type: PodScheduled
+      status: 'True'
+      lastProbeTime: null
+      lastTransitionTime: '2022-12-09T09:49:52Z'
+  hostIP: 10.244.64.100
+  podIP: 10.244.64.100
+  podIPs:
+    - ip: 10.244.64.100
+  startTime: '2022-12-09T09:49:52Z'
+  containerStatuses:
+    - restartCount: 0
+      started: true
+      ready: true
+      name: multi-nicd
+      state:
+        running:
+          startedAt: '2022-12-09T09:49:53Z'
+      imageID: >-
+        ghcr.io/foundation-model-stack/multi-nic-cni-daemon@sha256:5118f242d724a0857b24103bbe5590fd09027c45da5cd3ad43481a95abc26036
+      image: 'ghcr.io/foundation-model-stack/multi-nic-cni-daemon:v1.0.2'
+      lastState: {}
+      containerID: 'cri-o://b97ec4863563e7ccdb966d800d0e09d668a624182119112a7f700520693b38f0'
+  qosClass: Burstable
+
+

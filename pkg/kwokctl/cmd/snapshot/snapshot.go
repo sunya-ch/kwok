@@ -14,30 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package snapshot contains a parent command which snapshots one of cluster.
 package snapshot
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/snapshot/restore"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/snapshot/save"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 // NewCommand returns a new cobra.Command for cluster snapshot
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "snapshot",
 		Short: "Snapshot [save, restore] one of cluster",
 		Long:  "Snapshot [save, restore] one of cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			return fmt.Errorf("subcommand is required")
 		},
 	}
-	cmd.AddCommand(save.NewCommand(ctx))
-	cmd.AddCommand(restore.NewCommand(ctx))
+	cmd.AddCommand(save.NewCommand(logger))
+	cmd.AddCommand(restore.NewCommand(logger))
 	return cmd
 }

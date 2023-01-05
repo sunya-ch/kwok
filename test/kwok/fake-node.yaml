@@ -5,6 +5,7 @@ metadata:
     kwok.x-k8s.io/node: fake
     node.alpha.kubernetes.io/ttl: "0"
   labels:
+    app: fake-pod
     beta.kubernetes.io/arch: amd64
     beta.kubernetes.io/os: linux
     kubernetes.io/arch: amd64

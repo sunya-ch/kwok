@@ -4,7 +4,7 @@ metadata:
   name: fake-pod
   namespace: default
 spec:
-  replicas: 5
+  replicas: 10
   selector:
     matchLabels:
       app: fake-pod
@@ -21,12 +21,11 @@ spec:
                   - key: type
                     operator: In
                     values:
-                      - kwok-controller
+                      - kwok
       tolerations:
-        - key: "kwok-controller/provider"
+        - key: "kwok.x-k8s.io/node"
           operator: "Exists"
           effect: "NoSchedule"
       containers:
         - name: fake-container
-          image: fake
-      nodeName: fake-node
+          image: fake-image

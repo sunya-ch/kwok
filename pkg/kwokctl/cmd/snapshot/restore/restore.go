@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package restore provides a command to restore the snapshot of a cluster.
 package restore
 
 import (
@@ -23,10 +22,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/path"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 type flagpole struct {
@@ -36,17 +35,16 @@ type flagpole struct {
 }
 
 // NewCommand returns a new cobra.Command to save the cluster as a snapshot.
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	flags := &flagpole{}
-
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "restore",
 		Short: "Restore the snapshot of the cluster",
 		Long:  "Restore the snapshot of the cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags.Name = config.DefaultCluster
-			return runE(cmd.Context(), flags)
+			flags.Name = vars.DefaultCluster
+			return runE(cmd.Context(), logger, flags)
 		},
 	}
 	cmd.Flags().StringVar(&flags.Path, "path", "", "Path to the snapshot")
@@ -54,18 +52,15 @@ func NewCommand(ctx context.Context) *cobra.Command {
 	return cmd
 }
 
-func runE(ctx context.Context, flags *flagpole) error {
-	name := config.ClusterName(flags.Name)
-	workdir := path.Join(config.ClustersDir, flags.Name)
+func runE(ctx context.Context, logger logger.Logger, flags *flagpole) error {
+	name := fmt.Sprintf("%s-%s", vars.ProjectName, flags.Name)
+	workdir := utils.PathJoin(vars.ClustersDir, flags.Name)
+
 	if flags.Path == "" {
 		return fmt.Errorf("path is required")
 	}
 
-	logger := log.FromContext(ctx)
-	logger = logger.With("cluster", flags.Name)
-	ctx = log.NewContext(ctx, logger)
-
-	rt, err := runtime.DefaultRegistry.Load(ctx, name, workdir)
+	rt, err := runtime.DefaultRegistry.Load(name, workdir, logger)
 	if err != nil {
 		return err
 	}

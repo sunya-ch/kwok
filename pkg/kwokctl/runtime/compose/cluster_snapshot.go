@@ -20,30 +20,27 @@ import (
 	"context"
 	"os"
 
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/file"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
 )
 
 // SnapshotSave save the snapshot of cluster
 func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
-	config, err := c.Config(ctx)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
-	conf := &config.Options
-
-	etcdContainerName := c.Name() + "-etcd"
+	etcdContainerName := conf.Name + "-etcd"
 
 	// Save to /snapshot.db on container
 	tmpFile := "/snapshot.db"
-	err = exec.Exec(ctx, "", exec.IOStreams{}, conf.Runtime, "exec", "-i", etcdContainerName, "etcdctl", "snapshot", "save", tmpFile)
+	err = utils.Exec(ctx, "", utils.IOStreams{}, conf.Runtime, "exec", "-i", etcdContainerName, "etcdctl", "snapshot", "save", tmpFile)
 	if err != nil {
 		return err
 	}
 
 	// Copy to host path from container
-	err = exec.Exec(ctx, "", exec.IOStreams{}, conf.Runtime, "cp", etcdContainerName+":"+tmpFile, path)
+	err = utils.Exec(ctx, "", utils.IOStreams{}, conf.Runtime, "cp", etcdContainerName+":"+tmpFile, path)
 	if err != nil {
 		return err
 	}
@@ -52,88 +49,46 @@ func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
 
 // SnapshotRestore restore the snapshot of cluster
 func (c *Cluster) SnapshotRestore(ctx context.Context, path string) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-
-	etcdContainerName := c.Name() + "-etcd"
-
-	etcdctlPath := c.GetBinPath("etcdctl" + conf.BinSuffix)
-
-	err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+conf.BinSuffix, 0755, conf.QuietPull, true)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	logger := log.FromContext(ctx)
+	etcdContainerName := conf.Name + "-etcd"
+
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	etcdctlPath := utils.PathJoin(bin, "etcdctl"+vars.BinSuffix)
+
+	err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+vars.BinSuffix, 0755, conf.QuietPull, true)
+	if err != nil {
+		return err
+	}
+
+	err = c.Stop(ctx, "etcd")
+	if err != nil {
+		c.Logger().Printf("Failed to stop etcd: %v", err)
+	}
+	defer func() {
+		err = c.Start(ctx, "etcd")
+		if err != nil {
+			c.Logger().Printf("Failed to start etcd: %v", err)
+		}
+	}()
 
 	// Restore snapshot to host temporary directory
-	etcdDataTmp := c.GetWorkdirPath("etcd-data")
-	err = exec.Exec(ctx, "", exec.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
+	etcdDataTmp := utils.PathJoin(conf.Workdir, "etcd-data")
+	err = utils.Exec(ctx, "", utils.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		err = os.RemoveAll(etcdDataTmp)
-		if err != nil {
-			logger.Error("Failed to clear etcd temporary data", err)
-		}
+		os.RemoveAll(etcdDataTmp)
 	}()
 
-	if conf.Runtime != "nerdctl" {
-		// Restart etcd container
-		err = c.Stop(ctx, "etcd")
-		if err != nil {
-			logger.Error("Failed to stop etcd", err)
-		}
-		defer func() {
-			err = c.Start(ctx, "etcd")
-			if err != nil {
-				logger.Error("Failed to start etcd", err)
-			}
-		}()
-
-		// Copy to container from host temporary directory
-		err = exec.Exec(ctx, "", exec.IOStreams{}, conf.Runtime, "cp", etcdDataTmp, etcdContainerName+":/")
-		if err != nil {
-			return err
-		}
-	} else {
-		// TODO: remove this when `nerdctl cp` supports work on stopped containers
-		// https://github.com/containerd/nerdctl/issues/1812
-
-		// Stop the kube-apiserver container to avoid data modification by etcd during restore.
-		err = c.Stop(ctx, "kube-apiserver")
-		if err != nil {
-			logger.Error("Failed to stop kube-apiserver", err)
-		}
-		defer func() {
-			err = c.Start(ctx, "kube-apiserver")
-			if err != nil {
-				logger.Error("Failed to start kube-apiserver", err)
-			}
-		}()
-
-		// Copy to container from host temporary directory
-		err = exec.Exec(ctx, "", exec.IOStreams{}, conf.Runtime, "cp", etcdDataTmp, etcdContainerName+":/")
-		if err != nil {
-			return err
-		}
-
-		// Restart etcd container
-		err = c.Stop(ctx, "etcd")
-		if err != nil {
-			logger.Error("Failed to stop etcd", err)
-		}
-		defer func() {
-			err = c.Start(ctx, "etcd")
-			if err != nil {
-				logger.Error("Failed to start etcd", err)
-			}
-		}()
+	// Copy to container from host temporary directory
+	err = utils.Exec(ctx, "", utils.IOStreams{}, conf.Runtime, "cp", etcdDataTmp, etcdContainerName+":/")
+	if err != nil {
+		return err
 	}
-
 	return nil
 }

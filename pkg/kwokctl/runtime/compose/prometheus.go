@@ -18,10 +18,9 @@ package compose
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"text/template"
-
-	_ "embed"
 )
 
 //go:embed prometheus.yaml.tpl
@@ -33,14 +32,14 @@ func BuildPrometheus(conf BuildPrometheusConfig) (string, error) {
 	buf := bytes.NewBuffer(nil)
 	err := prometheusYamlTemplate.Execute(buf, conf)
 	if err != nil {
-		return "", fmt.Errorf("build prometheus error: %w", err)
+		return "", fmt.Errorf("build prometheus error: %s", err)
 	}
 	return buf.String(), nil
 }
 
 type BuildPrometheusConfig struct {
 	ProjectName  string
-	SecurePort   bool
+	SecretPort   bool
 	AdminCrtPath string
 	AdminKeyPath string
 }

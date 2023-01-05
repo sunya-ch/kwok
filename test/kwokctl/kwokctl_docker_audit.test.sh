@@ -25,6 +25,7 @@ source "${ROOT_DIR}/hack/requirements.sh"
 function requirements() {
   install_kubectl
   install_buildx
+  install_compose
 }
 
 function main() {

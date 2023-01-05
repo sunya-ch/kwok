@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package kubectl contains a command to use the kubectl in a cluster.
 package kubectl
 
 import (
@@ -24,28 +23,26 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"sigs.k8s.io/kwok/pkg/config"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/path"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 type flagpole struct {
 	Name string
 }
 
-// NewCommand returns a new cobra.Command for use kubectl in a cluster
-func NewCommand(ctx context.Context) *cobra.Command {
+// NewCommand returns a new cobra.Command for getting the list of clusters
+func NewCommand(logger logger.Logger) *cobra.Command {
 	flags := &flagpole{}
-
 	cmd := &cobra.Command{
 		Use:   "kubectl",
 		Short: "kubectl in cluster",
 		Long:  "kubectl in cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			flags.Name = config.DefaultCluster
-			err := runE(cmd.Context(), flags, args)
+			flags.Name = vars.DefaultCluster
+			err := runE(cmd.Context(), logger, flags, args)
 			if err != nil {
 				return fmt.Errorf("%v: %w", args, err)
 			}
@@ -56,20 +53,16 @@ func NewCommand(ctx context.Context) *cobra.Command {
 	return cmd
 }
 
-func runE(ctx context.Context, flags *flagpole, args []string) error {
-	name := config.ClusterName(flags.Name)
-	workdir := path.Join(config.ClustersDir, flags.Name)
+func runE(ctx context.Context, logger logger.Logger, flags *flagpole, args []string) error {
+	name := fmt.Sprintf("%s-%s", vars.ProjectName, flags.Name)
+	workdir := utils.PathJoin(vars.ClustersDir, flags.Name)
 
-	logger := log.FromContext(ctx)
-	logger = logger.With("cluster", flags.Name)
-	ctx = log.NewContext(ctx, logger)
-
-	rt, err := runtime.DefaultRegistry.Load(ctx, name, workdir)
+	rt, err := runtime.DefaultRegistry.Load(name, workdir, logger)
 	if err != nil {
 		return err
 	}
 
-	err = rt.KubectlInCluster(ctx, exec.IOStreams{
+	err = rt.KubectlInCluster(ctx, utils.IOStreams{
 		In:     os.Stdin,
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,

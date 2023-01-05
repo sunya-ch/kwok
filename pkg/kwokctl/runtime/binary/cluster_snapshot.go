@@ -21,28 +21,26 @@ import (
 	"os"
 
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/file"
-	"sigs.k8s.io/kwok/pkg/utils/format"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
 )
 
 // SnapshotSave save the snapshot of cluster
 func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-
-	etcdctlPath := c.GetBinPath("etcdctl" + conf.BinSuffix)
-
-	err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+conf.BinSuffix, 0755, conf.QuietPull, true)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	err = exec.Exec(ctx, "", exec.IOStreams{}, etcdctlPath, "snapshot", "save", path, "--endpoints=127.0.0.1:"+format.String(conf.EtcdPort))
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	etcdctlPath := utils.PathJoin(bin, "etcdctl"+vars.BinSuffix)
+
+	err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+vars.BinSuffix, 0755, conf.QuietPull, true)
+	if err != nil {
+		return err
+	}
+
+	err = utils.Exec(ctx, "", utils.IOStreams{}, etcdctlPath, "snapshot", "save", path, "--endpoints=127.0.0.1:"+utils.StringUint32(conf.EtcdPort))
 	if err != nil {
 		return err
 	}
@@ -52,47 +50,39 @@ func (c *Cluster) SnapshotSave(ctx context.Context, path string) error {
 
 // SnapshotRestore restore the snapshot of cluster
 func (c *Cluster) SnapshotRestore(ctx context.Context, path string) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-
-	etcdctlPath := c.GetBinPath("etcdctl" + conf.BinSuffix)
-
-	err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+conf.BinSuffix, 0755, conf.QuietPull, true)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	logger := log.FromContext(ctx)
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	etcdctlPath := utils.PathJoin(bin, "etcdctl"+vars.BinSuffix)
+
+	err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+vars.BinSuffix, 0755, conf.QuietPull, true)
+	if err != nil {
+		return err
+	}
 
 	err = c.Stop(ctx, "etcd")
 	if err != nil {
-		logger.Error("Failed to stop etcd", err)
+		c.Logger().Printf("Failed to stop etcd: %v", err)
 	}
 	defer func() {
 		err = c.Start(ctx, "etcd")
 		if err != nil {
-			logger.Error("Failed to start etcd", err)
+			c.Logger().Printf("Failed to start etcd: %v", err)
 		}
 	}()
 
-	etcdDataTmp := c.GetWorkdirPath("etcd-data")
-	err = os.RemoveAll(etcdDataTmp)
-	if err != nil {
-		return err
-	}
-	err = exec.Exec(ctx, "", exec.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
+	etcdDataTmp := utils.PathJoin(conf.Workdir, "etcd-data")
+	os.RemoveAll(etcdDataTmp)
+	err = utils.Exec(ctx, "", utils.IOStreams{}, etcdctlPath, "snapshot", "restore", path, "--data-dir", etcdDataTmp)
 	if err != nil {
 		return err
 	}
 
-	etcdDataPath := c.GetWorkdirPath(runtime.EtcdDataDirName)
-	err = os.RemoveAll(etcdDataPath)
-	if err != nil {
-		return err
-	}
+	etcdDataPath := utils.PathJoin(conf.Workdir, runtime.EtcdDataDirName)
+	os.RemoveAll(etcdDataPath)
 	err = os.Rename(etcdDataTmp, etcdDataPath)
 	if err != nil {
 		return err

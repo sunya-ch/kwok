@@ -14,34 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package get defines a parent command for getting artifacts,
-// clusters and kubeconfig.
 package get
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/get/artifacts"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/get/clusters"
 	"sigs.k8s.io/kwok/pkg/kwokctl/cmd/get/kubeconfig"
+	"sigs.k8s.io/kwok/pkg/logger"
 )
 
 // NewCommand returns a new cobra.Command for get
-func NewCommand(ctx context.Context) *cobra.Command {
+func NewCommand(logger logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Args:  cobra.NoArgs,
 		Use:   "get",
 		Short: "Gets one of [artifacts, clusters, kubeconfig]",
 		Long:  "Gets one of [artifacts, clusters, kubeconfig]",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			return fmt.Errorf("subcommand is required")
 		},
 	}
 	// add subcommands
-	cmd.AddCommand(clusters.NewCommand(ctx))
-	cmd.AddCommand(artifacts.NewCommand(ctx))
-	cmd.AddCommand(kubeconfig.NewCommand(ctx))
+	cmd.AddCommand(clusters.NewCommand(logger))
+	cmd.AddCommand(artifacts.NewCommand(logger))
+	cmd.AddCommand(kubeconfig.NewCommand(logger))
 	return cmd
 }

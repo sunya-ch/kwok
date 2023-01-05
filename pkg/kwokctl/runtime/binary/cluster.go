@@ -24,650 +24,567 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/nxadm/tail"
-	"golang.org/x/sync/errgroup"
-	"k8s.io/apimachinery/pkg/util/wait"
-
-	"sigs.k8s.io/kwok/pkg/apis/internalversion"
-	"sigs.k8s.io/kwok/pkg/kwokctl/components"
 	"sigs.k8s.io/kwok/pkg/kwokctl/k8s"
 	"sigs.k8s.io/kwok/pkg/kwokctl/pki"
 	"sigs.k8s.io/kwok/pkg/kwokctl/runtime"
-	"sigs.k8s.io/kwok/pkg/log"
-	"sigs.k8s.io/kwok/pkg/utils/exec"
-	"sigs.k8s.io/kwok/pkg/utils/file"
-	"sigs.k8s.io/kwok/pkg/utils/format"
-	"sigs.k8s.io/kwok/pkg/utils/net"
-	"sigs.k8s.io/kwok/pkg/utils/path"
-	"sigs.k8s.io/kwok/pkg/utils/slices"
-	"sigs.k8s.io/kwok/pkg/utils/version"
+	"sigs.k8s.io/kwok/pkg/kwokctl/utils"
+	"sigs.k8s.io/kwok/pkg/kwokctl/vars"
+	"sigs.k8s.io/kwok/pkg/logger"
+
+	"github.com/nxadm/tail"
 )
 
 type Cluster struct {
 	*runtime.Cluster
 }
 
-func NewCluster(name, workdir string) (runtime.Runtime, error) {
+func NewCluster(name, workdir string, logger logger.Logger) (runtime.Runtime, error) {
 	return &Cluster{
-		Cluster: runtime.NewCluster(name, workdir),
+		Cluster: runtime.NewCluster(name, workdir, logger),
 	}, nil
 }
 
-func (c *Cluster) download(ctx context.Context) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-
-	kubeApiserverPath := c.GetBinPath("kube-apiserver" + conf.BinSuffix)
-	err = file.DownloadWithCache(ctx, conf.CacheDir, conf.KubeApiserverBinary, kubeApiserverPath, 0755, conf.QuietPull)
+func (c *Cluster) Install(ctx context.Context) error {
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	kubeControllerManagerPath := c.GetBinPath("kube-controller-manager" + conf.BinSuffix)
-	err = file.DownloadWithCache(ctx, conf.CacheDir, conf.KubeControllerManagerBinary, kubeControllerManagerPath, 0755, conf.QuietPull)
+	bin := utils.PathJoin(conf.Workdir, "bin")
+
+	kubeApiserverPath := utils.PathJoin(bin, "kube-apiserver"+vars.BinSuffix)
+	err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.KubeApiserverBinary, kubeApiserverPath, 0755, conf.QuietPull)
 	if err != nil {
 		return err
 	}
 
-	kubeSchedulerPath := c.GetBinPath("kube-scheduler" + conf.BinSuffix)
-	err = file.DownloadWithCache(ctx, conf.CacheDir, conf.KubeSchedulerBinary, kubeSchedulerPath, 0755, conf.QuietPull)
+	kubeControllerManagerPath := utils.PathJoin(bin, "kube-controller-manager"+vars.BinSuffix)
+	err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.KubeControllerManagerBinary, kubeControllerManagerPath, 0755, conf.QuietPull)
 	if err != nil {
 		return err
 	}
 
-	kwokControllerPath := c.GetBinPath("kwok-controller" + conf.BinSuffix)
-	err = file.DownloadWithCache(ctx, conf.CacheDir, conf.KwokControllerBinary, kwokControllerPath, 0755, conf.QuietPull)
+	kubeSchedulerPath := utils.PathJoin(bin, "kube-scheduler"+vars.BinSuffix)
+	err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.KubeSchedulerBinary, kubeSchedulerPath, 0755, conf.QuietPull)
 	if err != nil {
 		return err
 	}
 
-	etcdPath := c.GetBinPath("etcd" + conf.BinSuffix)
+	kwokControllerPath := utils.PathJoin(bin, "kwok-controller"+vars.BinSuffix)
+	err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.KwokControllerBinary, kwokControllerPath, 0755, conf.QuietPull)
+	if err != nil {
+		return err
+	}
+
+	etcdPath := utils.PathJoin(bin, "etcd"+vars.BinSuffix)
 	if conf.EtcdBinary == "" {
-		err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdPath, "etcd"+conf.BinSuffix, 0755, conf.QuietPull, true)
+		err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdPath, "etcd"+vars.BinSuffix, 0755, conf.QuietPull, true)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = file.DownloadWithCache(ctx, conf.CacheDir, conf.EtcdBinary, etcdPath, 0755, conf.QuietPull)
+		err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.EtcdBinary, etcdPath, 0755, conf.QuietPull)
 		if err != nil {
 			return err
 		}
 	}
 
 	if conf.PrometheusPort != 0 {
-		prometheusPath := c.GetBinPath("prometheus" + conf.BinSuffix)
+		prometheusPath := utils.PathJoin(bin, "prometheus"+vars.BinSuffix)
 		if conf.PrometheusBinary == "" {
-			err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.PrometheusBinaryTar, prometheusPath, "prometheus"+conf.BinSuffix, 0755, conf.QuietPull, true)
+			err = utils.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.PrometheusBinaryTar, prometheusPath, "prometheus"+vars.BinSuffix, 0755, conf.QuietPull, true)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = file.DownloadWithCache(ctx, conf.CacheDir, conf.PrometheusBinary, prometheusPath, 0755, conf.QuietPull)
+			err = utils.DownloadWithCache(ctx, conf.CacheDir, conf.PrometheusBinary, prometheusPath, 0755, conf.QuietPull)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	return nil
-}
+	etcdDataPath := utils.PathJoin(conf.Workdir, runtime.EtcdDataDirName)
+	os.MkdirAll(etcdDataPath, 0755)
 
-func (c *Cluster) setup(ctx context.Context) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-
-	pkiPath := c.GetWorkdirPath(runtime.PkiName)
-	if !file.Exists(pkiPath) {
-		err = pki.GeneratePki(pkiPath)
+	if conf.SecretPort {
+		pkiPath := utils.PathJoin(conf.Workdir, runtime.PkiName)
+		err = pki.DumpPki(pkiPath)
 		if err != nil {
-			return fmt.Errorf("failed to generate pki: %w", err)
+			return fmt.Errorf("failed to generate pki: %s", err)
 		}
-	}
-
-	if conf.KubeAuditPolicy != "" {
-		auditLogPath := c.GetLogPath(runtime.AuditLogName)
-		err = file.Create(auditLogPath, 0644)
-		if err != nil {
-			return err
-		}
-
-		auditPolicyPath := c.GetWorkdirPath(runtime.AuditPolicyName)
-		err = file.Copy(conf.KubeAuditPolicy, auditPolicyPath)
-		if err != nil {
-			return err
-		}
-	}
-
-	etcdDataPath := c.GetWorkdirPath(runtime.EtcdDataDirName)
-	err = os.MkdirAll(etcdDataPath, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to mkdir etcd data path: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Cluster) setupPorts(ctx context.Context, ports ...*uint32) error {
-	for _, port := range ports {
-		if port != nil && *port == 0 {
-			p, err := net.GetUnusedPort(ctx)
-			if err != nil {
-				return err
-			}
-			*port = p
-		}
-	}
-	return nil
-}
-
-func (c *Cluster) Install(ctx context.Context) error {
-	config, err := c.Config(ctx)
+func (c *Cluster) Up(ctx context.Context) error {
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
-	conf := &config.Options
-
-	err = c.download(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = c.setup(ctx)
-	if err != nil {
-		return err
-	}
-
 	scheme := "http"
-	if conf.SecurePort {
+	if conf.SecretPort {
 		scheme = "https"
 	}
-	localAddress := "127.0.0.1"
-	workdir := c.Workdir()
+	bin := utils.PathJoin(conf.Workdir, "bin")
 
-	kubeconfigPath := c.GetWorkdirPath(runtime.InHostKubeconfigName)
-	kubeApiserverPath := c.GetBinPath("kube-apiserver" + conf.BinSuffix)
-	kubeControllerManagerPath := c.GetBinPath("kube-controller-manager" + conf.BinSuffix)
-	kubeSchedulerPath := c.GetBinPath("kube-scheduler" + conf.BinSuffix)
-	kwokControllerPath := c.GetBinPath("kwok-controller" + conf.BinSuffix)
-	kwokConfigPath := c.GetWorkdirPath(runtime.ConfigName)
-	etcdPath := c.GetBinPath("etcd" + conf.BinSuffix)
-	etcdDataPath := c.GetWorkdirPath(runtime.EtcdDataDirName)
-	pkiPath := c.GetWorkdirPath(runtime.PkiName)
-	caCertPath := path.Join(pkiPath, "ca.crt")
-	adminKeyPath := path.Join(pkiPath, "admin.key")
-	adminCertPath := path.Join(pkiPath, "admin.crt")
+	localAddress := "127.0.0.1"
+	serveAddress := "0.0.0.0"
+
+	kubeApiserverPath := utils.PathJoin(bin, "kube-apiserver"+vars.BinSuffix)
+	kubeControllerManagerPath := utils.PathJoin(bin, "kube-controller-manager"+vars.BinSuffix)
+	kubeSchedulerPath := utils.PathJoin(bin, "kube-scheduler"+vars.BinSuffix)
+	kwokControllerPath := utils.PathJoin(bin, "kwok-controller"+vars.BinSuffix)
+	etcdPath := utils.PathJoin(bin, "etcd"+vars.BinSuffix)
+	etcdDataPath := utils.PathJoin(conf.Workdir, runtime.EtcdDataDirName)
+	pkiPath := utils.PathJoin(conf.Workdir, runtime.PkiName)
+	caCertPath := utils.PathJoin(pkiPath, "ca.crt")
+	adminKeyPath := utils.PathJoin(pkiPath, "admin.key")
+	adminCertPath := utils.PathJoin(pkiPath, "admin.crt")
 	auditLogPath := ""
 	auditPolicyPath := ""
+	if conf.AuditPolicy != "" {
+		auditLogPath = utils.PathJoin(conf.Workdir, "logs", runtime.AuditLogName)
+		err = utils.CreateFile(auditLogPath, 0644)
+		if err != nil {
+			return err
+		}
 
-	if conf.KubeAuditPolicy != "" {
-		auditLogPath = c.GetLogPath(runtime.AuditLogName)
-		auditPolicyPath = c.GetWorkdirPath(runtime.AuditPolicyName)
+		auditPolicyPath = utils.PathJoin(conf.Workdir, runtime.AuditPolicyName)
+		err = utils.CopyFile(conf.AuditPolicy, auditPolicyPath)
+		if err != nil {
+			return err
+		}
 	}
 
-	err = c.setupPorts(ctx,
-		&conf.EtcdPeerPort,
-		&conf.EtcdPort,
-		&conf.KubeApiserverPort,
-		&conf.KwokControllerPort,
-	)
+	etcdPeerPort := conf.EtcdPeerPort
+	if etcdPeerPort == 0 {
+		etcdPeerPort, err = utils.GetUnusedPort()
+		if err != nil {
+			return err
+		}
+		conf.EtcdPeerPort = etcdPeerPort
+	}
+	etcdPeerPortStr := utils.StringUint32(etcdPeerPort)
+
+	etcdClientPort := conf.EtcdPort
+	if etcdClientPort == 0 {
+		etcdClientPort, err = utils.GetUnusedPort()
+		if err != nil {
+			return err
+		}
+		conf.EtcdPort = etcdClientPort
+	}
+	etcdClientPortStr := utils.StringUint32(etcdClientPort)
+
+	etcdArgs := []string{
+		"--data-dir",
+		etcdDataPath,
+		"--name",
+		"node0",
+		"--initial-advertise-peer-urls",
+		"http://" + localAddress + ":" + etcdPeerPortStr,
+		"--listen-peer-urls",
+		"http://" + localAddress + ":" + etcdPeerPortStr,
+		"--advertise-client-urls",
+		"http://" + localAddress + ":" + etcdClientPortStr,
+		"--listen-client-urls",
+		"http://" + localAddress + ":" + etcdClientPortStr,
+		"--initial-cluster",
+		"node0=http://" + localAddress + ":" + etcdPeerPortStr,
+		"--auto-compaction-retention",
+		"1",
+		"--quota-backend-bytes",
+		"8589934592",
+	}
+	err = utils.ForkExec(ctx, conf.Workdir, etcdPath, etcdArgs...)
 	if err != nil {
 		return err
 	}
 
-	// Configure the etcd
-	etcdVersion, err := version.ParseFromBinary(ctx, etcdPath)
-	if err != nil {
-		return err
+	kubeApiserverPort := conf.KubeApiserverPort
+	if kubeApiserverPort == 0 {
+		kubeApiserverPort, err = utils.GetUnusedPort()
+		if err != nil {
+			return err
+		}
+		conf.KubeApiserverPort = kubeApiserverPort
 	}
-	etcdComponent, err := components.BuildEtcdComponent(components.BuildEtcdComponentConfig{
-		Workdir:  workdir,
-		Binary:   etcdPath,
-		Version:  etcdVersion,
-		Address:  localAddress,
-		DataPath: etcdDataPath,
-		Port:     conf.EtcdPort,
-		PeerPort: conf.EtcdPeerPort,
-	})
-	if err != nil {
-		return err
-	}
-	config.Components = append(config.Components, etcdComponent)
+	kubeApiserverPortStr := utils.StringUint32(kubeApiserverPort)
 
-	// Configure the kube-apiserver
-	kubeApiserverVersion, err := version.ParseFromBinary(ctx, kubeApiserverPath)
-	if err != nil {
-		return err
+	kubeApiserverArgs := []string{
+		"--admission-control",
+		"",
+		"--etcd-servers",
+		"http://" + localAddress + ":" + etcdClientPortStr,
+		"--etcd-prefix",
+		"/prefix/registry",
+		"--allow-privileged",
 	}
-	kubeApiserverComponent, err := components.BuildKubeApiserverComponent(components.BuildKubeApiserverComponentConfig{
-		Workdir:           workdir,
-		Binary:            kubeApiserverPath,
-		Version:           kubeApiserverVersion,
-		Port:              conf.KubeApiserverPort,
-		EtcdAddress:       localAddress,
-		EtcdPort:          conf.EtcdPort,
-		KubeRuntimeConfig: conf.KubeRuntimeConfig,
-		KubeFeatureGates:  conf.KubeFeatureGates,
-		SecurePort:        conf.SecurePort,
-		KubeAuthorization: conf.KubeAuthorization,
-		AuditPolicyPath:   auditPolicyPath,
-		AuditLogPath:      auditLogPath,
-		CaCertPath:        caCertPath,
-		AdminCertPath:     adminCertPath,
-		AdminKeyPath:      adminKeyPath,
-	})
-	if err != nil {
-		return err
-	}
-	config.Components = append(config.Components, kubeApiserverComponent)
-
-	// Configure the kube-controller-manager
-	if !conf.DisableKubeControllerManager {
-		err = c.setupPorts(ctx,
-			&conf.KubeControllerManagerPort,
+	if conf.RuntimeConfig != "" {
+		kubeApiserverArgs = append(kubeApiserverArgs,
+			"--runtime-config",
+			conf.RuntimeConfig,
 		)
-		if err != nil {
-			return err
-		}
-
-		kubeControllerManagerVersion, err := version.ParseFromBinary(ctx, kubeControllerManagerPath)
-		if err != nil {
-			return err
-		}
-		kubeControllerManagerComponent, err := components.BuildKubeControllerManagerComponent(components.BuildKubeControllerManagerComponentConfig{
-			Workdir:           workdir,
-			Binary:            kubeControllerManagerPath,
-			Version:           kubeControllerManagerVersion,
-			Address:           localAddress,
-			Port:              conf.KubeControllerManagerPort,
-			SecurePort:        conf.SecurePort,
-			CaCertPath:        caCertPath,
-			AdminKeyPath:      adminKeyPath,
-			KubeAuthorization: conf.KubeAuthorization,
-			KubeconfigPath:    kubeconfigPath,
-			KubeFeatureGates:  conf.KubeFeatureGates,
-		})
-		if err != nil {
-			return err
-		}
-		config.Components = append(config.Components, kubeControllerManagerComponent)
 	}
-
-	// Configure the kube-scheduler
-	if !conf.DisableKubeScheduler {
-		err = c.setupPorts(ctx,
-			&conf.KubeSchedulerPort,
+	if conf.FeatureGates != "" {
+		kubeApiserverArgs = append(kubeApiserverArgs,
+			"--feature-gates",
+			conf.FeatureGates,
 		)
-		if err != nil {
-			return err
-		}
-
-		kubeSchedulerVersion, err := version.ParseFromBinary(ctx, kubeSchedulerPath)
-		if err != nil {
-			return err
-		}
-		kubeSchedulerComponent, err := components.BuildKubeSchedulerComponent(components.BuildKubeSchedulerComponentConfig{
-			Workdir:          workdir,
-			Binary:           kubeSchedulerPath,
-			Version:          kubeSchedulerVersion,
-			Address:          localAddress,
-			Port:             conf.KubeSchedulerPort,
-			SecurePort:       conf.SecurePort,
-			CaCertPath:       caCertPath,
-			AdminKeyPath:     adminKeyPath,
-			KubeconfigPath:   kubeconfigPath,
-			KubeFeatureGates: conf.KubeFeatureGates,
-		})
-		if err != nil {
-			return err
-		}
-		config.Components = append(config.Components, kubeSchedulerComponent)
 	}
 
-	// Configure the kwok-controller
-	kwokControllerVersion, err := version.ParseFromBinary(ctx, kwokControllerPath)
+	if conf.SecretPort {
+		kubeApiserverArgs = append(kubeApiserverArgs,
+			"--bind-address",
+			serveAddress,
+			"--secure-port",
+			kubeApiserverPortStr,
+			"--tls-cert-file",
+			adminCertPath,
+			"--tls-private-key-file",
+			adminKeyPath,
+			"--client-ca-file",
+			caCertPath,
+			"--service-account-key-file",
+			adminKeyPath,
+			"--service-account-signing-key-file",
+			adminKeyPath,
+			"--service-account-issuer",
+			"https://kubernetes.default.svc.cluster.local",
+		)
+	} else {
+		kubeApiserverArgs = append(kubeApiserverArgs,
+			"--insecure-bind-address",
+			serveAddress,
+			"--insecure-port",
+			kubeApiserverPortStr,
+			"--cert-dir",
+			utils.PathJoin(conf.Workdir, "cert"),
+		)
+	}
+
+	if auditPolicyPath != "" {
+		kubeApiserverArgs = append(kubeApiserverArgs,
+			"--audit-policy-file",
+			auditPolicyPath,
+			"--audit-log-path",
+			auditLogPath,
+		)
+	}
+
+	err = utils.ForkExec(ctx, conf.Workdir, kubeApiserverPath, kubeApiserverArgs...)
 	if err != nil {
 		return err
 	}
-	kwokControllerComponent, err := components.BuildKwokControllerComponent(components.BuildKwokControllerComponentConfig{
-		Workdir:        workdir,
-		Binary:         kwokControllerPath,
-		Version:        kwokControllerVersion,
-		Address:        localAddress,
-		Port:           conf.KwokControllerPort,
-		ConfigPath:     kwokConfigPath,
-		KubeconfigPath: kubeconfigPath,
-	})
-	if err != nil {
-		return err
-	}
-	config.Components = append(config.Components, kwokControllerComponent)
 
-	// Configure the prometheus
-	if conf.PrometheusPort != 0 {
-		prometheusPath := c.GetBinPath("prometheus" + conf.BinSuffix)
-
-		prometheusData, err := BuildPrometheus(BuildPrometheusConfig{
-			ProjectName:               c.Name(),
-			SecurePort:                conf.SecurePort,
-			AdminCrtPath:              adminCertPath,
-			AdminKeyPath:              adminKeyPath,
-			PrometheusPort:            conf.PrometheusPort,
-			EtcdPort:                  conf.EtcdPort,
-			KubeApiserverPort:         conf.KubeApiserverPort,
-			KubeControllerManagerPort: conf.KubeControllerManagerPort,
-			KubeSchedulerPort:         conf.KubeSchedulerPort,
-			KwokControllerPort:        conf.KwokControllerPort,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to generate prometheus yaml: %w", err)
-		}
-		prometheusConfigPath := c.GetWorkdirPath(runtime.Prometheus)
-		err = os.WriteFile(prometheusConfigPath, []byte(prometheusData), 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write prometheus yaml: %w", err)
-		}
-
-		prometheusVersion, err := version.ParseFromBinary(ctx, prometheusPath)
-		if err != nil {
-			return err
-		}
-		prometheusComponent, err := components.BuildPrometheusComponent(components.BuildPrometheusComponentConfig{
-			Workdir:    workdir,
-			Binary:     prometheusPath,
-			Version:    prometheusVersion,
-			Address:    localAddress,
-			Port:       conf.PrometheusPort,
-			ConfigPath: prometheusConfigPath,
-		})
-		if err != nil {
-			return err
-		}
-		config.Components = append(config.Components, prometheusComponent)
-	}
-
-	// Setup kubeconfig
 	kubeconfigData, err := k8s.BuildKubeconfig(k8s.BuildKubeconfigConfig{
-		ProjectName:  c.Name(),
-		SecurePort:   conf.SecurePort,
-		Address:      scheme + "://" + localAddress + ":" + format.String(conf.KubeApiserverPort),
+		ProjectName:  conf.Name,
+		SecretPort:   conf.SecretPort,
+		Address:      scheme + "://" + localAddress + ":" + kubeApiserverPortStr,
 		AdminCrtPath: adminCertPath,
 		AdminKeyPath: adminKeyPath,
 	})
 	if err != nil {
 		return err
 	}
+
+	kubeconfigPath := utils.PathJoin(conf.Workdir, runtime.InHostKubeconfigName)
 	err = os.WriteFile(kubeconfigPath, []byte(kubeconfigData), 0644)
 	if err != nil {
 		return err
 	}
 
-	// Save config
-	logger := log.FromContext(ctx)
-	err = c.SetConfig(ctx, config)
+	err = c.WaitReady(ctx, 30*time.Second)
 	if err != nil {
-		logger.Error("Failed to set config", err)
-	}
-	err = c.Save(ctx)
-	if err != nil {
-		logger.Error("Failed to update cluster", err)
+		return fmt.Errorf("failed to wait for kube-apiserver ready: %v", err)
 	}
 
-	// set the context in default kubeconfig
-	_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "clusters."+c.Name()+".server", scheme+"://"+localAddress+":"+format.String(conf.KubeApiserverPort))
-	_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "contexts."+c.Name()+".cluster", c.Name())
-	if conf.SecurePort {
-		_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "clusters."+c.Name()+".insecure-skip-tls-verify", "true")
-		_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "contexts."+c.Name()+".user", c.Name())
-		_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "users."+c.Name()+".client-certificate", adminCertPath)
-		_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "set", "users."+c.Name()+".client-key", adminKeyPath)
+	kubeControllerManagerArgs := []string{
+		"--kubeconfig",
+		kubeconfigPath,
 	}
-	return nil
-}
-
-func (c *Cluster) Uninstall(ctx context.Context) error {
-	// unset the context in default kubeconfig
-	_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "unset", "clusters."+c.Name())
-	_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "unset", "users."+c.Name())
-	_ = c.Kubectl(ctx, exec.IOStreams{}, "config", "unset", "contexts."+c.Name())
-
-	err := c.Cluster.Uninstall(ctx)
-	if err != nil {
-		return err
+	if conf.FeatureGates != "" {
+		kubeControllerManagerArgs = append(kubeControllerManagerArgs,
+			"--feature-gates",
+			conf.FeatureGates,
+		)
 	}
 
-	return nil
-}
-
-func (c *Cluster) isRunning(ctx context.Context, component internalversion.Component) bool {
-	return exec.IsRunning(ctx, component.WorkDir, component.Binary)
-}
-
-func (c *Cluster) startComponent(ctx context.Context, component internalversion.Component) error {
-	return exec.ForkExec(ctx, component.WorkDir, component.Binary, component.Args...)
-}
-
-func (c *Cluster) startComponents(ctx context.Context, cs []internalversion.Component) error {
-	groups, err := components.GroupByLinks(cs)
-	if err != nil {
-		return err
-	}
-
-	logger := log.FromContext(ctx)
-
-	err = wait.PollImmediateUntilWithContext(ctx, 1*time.Second, func(ctx context.Context) (bool, error) {
-		for i, group := range groups {
-			if len(group) == 1 {
-				if err = c.startComponent(ctx, group[0]); err != nil {
-					return false, err
-				}
-			} else { // parallel start components
-				g, ctx := errgroup.WithContext(ctx)
-				for _, component := range group {
-					component := component
-					logger.Debug("Starting component",
-						"component", component.Name,
-						"group", i,
-					)
-					g.Go(func() error {
-						return c.startComponent(ctx, component)
-					})
-				}
-				if err := g.Wait(); err != nil {
-					return false, err
-				}
-			}
-		}
-
-		// check apiserver is ready
-		ready, err := c.Ready(ctx)
+	kubeControllerManagerPort := conf.KubeControllerManagerPort
+	if kubeControllerManagerPort == 0 {
+		kubeControllerManagerPort, err = utils.GetUnusedPort()
 		if err != nil {
-			logger.Debug("Apiserver is not ready",
-				"err", err,
-			)
-			return false, nil
+			return err
 		}
-		if !ready {
-			logger.Debug("Apiserver is not ready")
-			return false, nil
-		}
+		conf.KubeControllerManagerPort = kubeControllerManagerPort
+	}
+	if conf.SecretPort {
+		kubeControllerManagerArgs = append(kubeControllerManagerArgs,
+			"--bind-address",
+			localAddress,
+			"--secure-port",
+			utils.StringUint32(kubeControllerManagerPort),
+			"--authorization-always-allow-paths",
+			"/healthz,/metrics",
+		)
+	} else {
+		kubeControllerManagerArgs = append(kubeControllerManagerArgs,
+			"--address",
+			localAddress,
+			"--port",
+			utils.StringUint32(kubeControllerManagerPort),
+			"--secure-port",
+			"0",
+		)
+	}
 
-		// check if all components is running
-		for i, group := range groups {
-			component, notReady := slices.Find(group, func(component internalversion.Component) bool {
-				return !c.isRunning(ctx, component)
-			})
-			if notReady {
-				logger.Debug("Component is not running, retrying",
-					"component", component.Name,
-					"group", i,
-				)
-				return false, nil
+	err = utils.ForkExec(ctx, conf.Workdir, kubeControllerManagerPath, kubeControllerManagerArgs...)
+	if err != nil {
+		return err
+	}
+
+	kubeSchedulerArgs := []string{
+		"--kubeconfig",
+		kubeconfigPath,
+	}
+	if conf.FeatureGates != "" {
+		kubeSchedulerArgs = append(kubeSchedulerArgs,
+			"--feature-gates",
+			conf.FeatureGates,
+		)
+	}
+
+	kubeSchedulerPort := conf.KubeSchedulerPort
+	if kubeSchedulerPort == 0 {
+		kubeSchedulerPort, err = utils.GetUnusedPort()
+		if err != nil {
+			return err
+		}
+		conf.KubeSchedulerPort = kubeSchedulerPort
+	}
+	if conf.SecretPort {
+		kubeSchedulerArgs = append(kubeSchedulerArgs,
+			"--bind-address",
+			localAddress,
+			"--secure-port",
+			utils.StringUint32(kubeSchedulerPort),
+			"--authorization-always-allow-paths",
+			"/healthz,/metrics",
+		)
+	} else {
+		kubeSchedulerArgs = append(kubeSchedulerArgs,
+			"--address",
+			localAddress,
+			"--port",
+			utils.StringUint32(kubeSchedulerPort),
+		)
+	}
+	err = utils.ForkExec(ctx, conf.Workdir, kubeSchedulerPath, kubeSchedulerArgs...)
+	if err != nil {
+		return err
+	}
+
+	kwokControllerArgs := []string{
+		"--kubeconfig",
+		kubeconfigPath,
+		"--manage-all-nodes",
+	}
+
+	kwokControllerPort := conf.KwokControllerPort
+	if conf.PrometheusPort != 0 {
+		if kwokControllerPort == 0 {
+			kwokControllerPort, err = utils.GetUnusedPort()
+			if err != nil {
+				return err
 			}
+			conf.KwokControllerPort = kwokControllerPort
 		}
-		return true, nil
-	})
+		kwokControllerArgs = append(kwokControllerArgs,
+			"--server-address",
+			localAddress+":"+utils.StringUint32(kwokControllerPort),
+		)
+	}
+	err = utils.ForkExec(ctx, conf.Workdir, kwokControllerPath, kwokControllerArgs...)
 	if err != nil {
 		return err
 	}
 
-	return nil
-}
+	if conf.PrometheusPort != 0 {
+		prometheusPortStr := utils.StringUint32(conf.PrometheusPort)
 
-func (c *Cluster) stopComponent(ctx context.Context, component internalversion.Component) error {
-	return exec.ForkExecKill(ctx, component.WorkDir, component.Binary)
-}
-
-func (c *Cluster) stopComponents(ctx context.Context, cs []internalversion.Component) error {
-	groups, err := components.GroupByLinks(cs)
-	if err != nil {
-		return err
-	}
-	g, _ := errgroup.WithContext(ctx)
-	for i := len(groups) - 1; i >= 0; i-- {
-		group := groups[i]
-		for _, component := range group {
-			component := component
-			g.Go(func() error {
-				return c.stopComponent(ctx, component)
-			})
+		prometheusData, err := BuildPrometheus(BuildPrometheusConfig{
+			ProjectName:               conf.Name,
+			SecretPort:                conf.SecretPort,
+			AdminCrtPath:              adminCertPath,
+			AdminKeyPath:              adminKeyPath,
+			PrometheusPort:            conf.PrometheusPort,
+			EtcdPort:                  etcdClientPort,
+			KubeApiserverPort:         kubeApiserverPort,
+			KubeControllerManagerPort: kubeControllerManagerPort,
+			KubeSchedulerPort:         kubeSchedulerPort,
+			KwokControllerPort:        kwokControllerPort,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to generate prometheus yaml: %s", err)
 		}
-		if err := g.Wait(); err != nil {
+		prometheusConfigPath := utils.PathJoin(conf.Workdir, runtime.Prometheus)
+		err = os.WriteFile(prometheusConfigPath, []byte(prometheusData), 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write prometheus yaml: %s", err)
+		}
+
+		prometheusPath := utils.PathJoin(bin, "prometheus")
+		prometheusArgs := []string{
+			"--config.file",
+			prometheusConfigPath,
+			"--web.listen-address",
+			serveAddress + ":" + prometheusPortStr,
+		}
+		err = utils.ForkExec(ctx, conf.Workdir, prometheusPath, prometheusArgs...)
+		if err != nil {
 			return err
 		}
 	}
-	return nil
-}
 
-func (c *Cluster) Up(ctx context.Context) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
+	// set the context in default kubeconfig
+	c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "clusters."+conf.Name+".server", scheme+"://"+localAddress+":"+kubeApiserverPortStr)
+	c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "contexts."+conf.Name+".cluster", conf.Name)
+	if conf.SecretPort {
+		c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "clusters."+conf.Name+".insecure-skip-tls-verify", "true")
+		c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "contexts."+conf.Name+".user", conf.Name)
+		c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "users."+conf.Name+".client-certificate", adminCertPath)
+		c.Kubectl(ctx, utils.IOStreams{}, "config", "set", "users."+conf.Name+".client-key", adminKeyPath)
 	}
 
-	err = c.startComponents(ctx, config.Components)
+	err = c.Update(ctx, conf)
 	if err != nil {
-		return err
+		c.Logger().Printf("failed to update cluster: %s", err)
 	}
-
 	return nil
 }
 
 func (c *Cluster) Down(ctx context.Context) error {
-	config, err := c.Config(ctx)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	err = c.stopComponents(ctx, config.Components)
+	c.Kubectl(ctx, utils.IOStreams{}, "config", "unset", "clusters."+conf.Name)
+	c.Kubectl(ctx, utils.IOStreams{}, "config", "unset", "users."+conf.Name)
+	c.Kubectl(ctx, utils.IOStreams{}, "config", "unset", "contexts."+conf.Name)
+
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	kubeApiserverPath := utils.PathJoin(bin, "kube-apiserver"+vars.BinSuffix)
+	kubeControllerManagerPath := utils.PathJoin(bin, "kube-controller-manager"+vars.BinSuffix)
+	kubeSchedulerPath := utils.PathJoin(bin, "kube-scheduler"+vars.BinSuffix)
+	kwokControllerPath := utils.PathJoin(bin, "kwok-controller"+vars.BinSuffix)
+	etcdPath := utils.PathJoin(bin, "etcd")
+	prometheusPath := utils.PathJoin(bin, "prometheus")
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, kwokControllerPath)
 	if err != nil {
-		return err
+		c.Logger().Printf("failed to kill kwok: %s", err)
+	}
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, kubeSchedulerPath)
+	if err != nil {
+		c.Logger().Printf("failed to kill kube-scheduler: %s", err)
+	}
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, kubeControllerManagerPath)
+	if err != nil {
+		c.Logger().Printf("failed to kill kube-controller-manager: %s", err)
+	}
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, kubeApiserverPath)
+	if err != nil {
+		c.Logger().Printf("failed to kill kube-apiserver: %s", err)
+	}
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, etcdPath)
+	if err != nil {
+		c.Logger().Printf("failed to kill etcd: %s", err)
+	}
+
+	if conf.PrometheusPort != 0 {
+		err = utils.ForkExecKill(ctx, conf.Workdir, prometheusPath)
+		if err != nil {
+			c.Logger().Printf("failed to kill prometheus: %s", err)
+		}
 	}
 
 	return nil
 }
 
-func (c *Cluster) getComponent(ctx context.Context, name string) (internalversion.Component, error) {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return internalversion.Component{}, err
-	}
-	component, ok := slices.Find(config.Components, func(component internalversion.Component) bool {
-		return component.Name == name
-	})
-	if !ok {
-		return internalversion.Component{}, fmt.Errorf("%w: %s", runtime.ErrComponentNotFound, name)
-	}
-
-	return component, nil
-}
-
 func (c *Cluster) Start(ctx context.Context, name string) error {
-	component, err := c.getComponent(ctx, name)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	err = c.startComponent(ctx, component)
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	svc := utils.PathJoin(bin, name)
+
+	err = utils.ForkExecRestart(ctx, conf.Workdir, svc)
 	if err != nil {
-		return fmt.Errorf("failed to start %s: %w", name, err)
+		return fmt.Errorf("failed to restart %s: %w", name, err)
 	}
 	return nil
 }
 
 func (c *Cluster) Stop(ctx context.Context, name string) error {
-	component, err := c.getComponent(ctx, name)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	err = c.stopComponent(ctx, component)
+	bin := utils.PathJoin(conf.Workdir, "bin")
+	svc := utils.PathJoin(bin, name)
+
+	err = utils.ForkExecKill(ctx, conf.Workdir, svc)
 	if err != nil {
-		return fmt.Errorf("failed to stop %s: %w", name, err)
+		return fmt.Errorf("failed to kill %s: %w", name, err)
 	}
 	return nil
 }
 
 func (c *Cluster) Logs(ctx context.Context, name string, out io.Writer) error {
-	_, err := c.getComponent(ctx, name)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	logger := log.FromContext(ctx)
-
-	logs := c.GetLogPath(filepath.Base(name) + ".log")
+	logs := utils.PathJoin(conf.Workdir, "logs", filepath.Base(name)+".log")
 
 	f, err := os.OpenFile(logs, os.O_RDONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		err = f.Close()
-		if err != nil {
-			logger.Error("Failed to close file", err)
-		}
-	}()
+	defer f.Close()
 
-	_, err = io.Copy(out, f)
-	if err != nil {
-		return err
-	}
+	io.Copy(out, f)
 	return nil
 }
 
 func (c *Cluster) LogsFollow(ctx context.Context, name string, out io.Writer) error {
-	_, err := c.getComponent(ctx, name)
+	conf, err := c.Config()
 	if err != nil {
 		return err
 	}
 
-	logger := log.FromContext(ctx)
-
-	logs := c.GetLogPath(filepath.Base(name) + ".log")
+	logs := utils.PathJoin(conf.Workdir, "logs", filepath.Base(name)+".log")
 
 	t, err := tail.TailFile(logs, tail.Config{ReOpen: true, Follow: true})
 	if err != nil {
 		return err
 	}
-	defer func() {
-		err = t.Stop()
-		if err != nil {
-			logger.Error("Failed to stop tail file", err)
-		}
-	}()
+	defer t.Stop()
 
 	go func() {
 		for line := range t.Lines {
-			_, err = out.Write([]byte(line.Text + "\n"))
-			if err != nil {
-				logger.Error("Failed to write line text", err)
-			}
+			out.Write([]byte(line.Text + "\n"))
 		}
 	}()
 	<-ctx.Done()
@@ -675,12 +592,22 @@ func (c *Cluster) LogsFollow(ctx context.Context, name string, out io.Writer) er
 }
 
 // ListBinaries list binaries in the cluster
-func (c *Cluster) ListBinaries(ctx context.Context) ([]string, error) {
-	config, err := c.Config(ctx)
+func (c *Cluster) ListBinaries(ctx context.Context, actual bool) ([]string, error) {
+	if !actual {
+		return []string{
+			vars.EtcdBinaryTar,
+			vars.KubeApiserverBinary,
+			vars.KubeControllerManagerBinary,
+			vars.KubeSchedulerBinary,
+			vars.KwokControllerBinary,
+			vars.PrometheusBinaryTar,
+			vars.KubectlBinary,
+		}, nil
+	}
+	conf, err := c.Config()
 	if err != nil {
 		return nil, err
 	}
-	conf := &config.Options
 
 	return []string{
 		conf.EtcdBinaryTar,
@@ -689,28 +616,18 @@ func (c *Cluster) ListBinaries(ctx context.Context) ([]string, error) {
 		conf.KubeSchedulerBinary,
 		conf.KwokControllerBinary,
 		conf.PrometheusBinaryTar,
-		conf.KubectlBinary,
+		vars.KubectlBinary,
 	}, nil
 }
 
 // ListImages list images in the cluster
-func (c *Cluster) ListImages(ctx context.Context) ([]string, error) {
+func (c *Cluster) ListImages(ctx context.Context, actual bool) ([]string, error) {
+	if !actual {
+		return []string{}, nil
+	}
+	_, err := c.Config()
+	if err != nil {
+		return nil, err
+	}
 	return []string{}, nil
-}
-
-// EtcdctlInCluster implements the ectdctl subcommand
-func (c *Cluster) EtcdctlInCluster(ctx context.Context, stm exec.IOStreams, args ...string) error {
-	config, err := c.Config(ctx)
-	if err != nil {
-		return err
-	}
-	conf := &config.Options
-	etcdctlPath := c.GetBinPath("etcdctl" + conf.BinSuffix)
-
-	err = file.DownloadWithCacheAndExtract(ctx, conf.CacheDir, conf.EtcdBinaryTar, etcdctlPath, "etcdctl"+conf.BinSuffix, 0755, conf.QuietPull, true)
-	if err != nil {
-		return err
-	}
-
-	return exec.Exec(ctx, "", stm, etcdctlPath, append([]string{"--endpoints", "127.0.0.1:" + format.String(conf.EtcdPort)}, args...)...)
 }
